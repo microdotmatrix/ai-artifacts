@@ -10,7 +10,10 @@ export const Header = () => {
           <Icon icon="simple-icons:nextdotjs" className="size-8" />
         </Link>
       </section>
-      <section>
+      <section className="flex items-center gap-4">
+        <Link href="/artifact" className="text-sm font-medium hover:underline">
+          Artifact
+        </Link>
         <ThemeToggle />
       </section>
     </header>

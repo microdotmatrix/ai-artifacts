@@ -30,3 +30,15 @@ export function action<S extends z.ZodType<any, any>, T>(
     return action(result.data, formData);
   };
 }
+
+export function generateUUID(): string {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+export function sanitizeText(text: string) {
+  return text.replace("<has_function_call>", "");
+}
