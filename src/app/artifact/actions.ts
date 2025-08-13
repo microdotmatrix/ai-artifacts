@@ -4,6 +4,13 @@ import { z } from "zod";
 import { env } from "@/lib/env/server";
 import { generateObject } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
+import { getSessionUser } from "@/lib/auth/server";
+import { db } from "@/lib/db";
+import {
+  ArtifactDocumentTable,
+  ArtifactMessageTable,
+} from "@/lib/db/schema";
+import { and, eq, isNull } from "drizzle-orm";
 
 export type ChatMessage = {
   role: "user" | "assistant";
@@ -20,17 +27,35 @@ export type ArtifactState = {
 const inputSchema = z.object({
   prompt: z.string().min(1, "Prompt is required").max(4000),
   doc: z.string().default(""),
+  entryId: z.string().uuid().nullable().optional(),
+  docType: z.enum(["obituary", "eulogy"]).optional().default("obituary"),
 });
 
 export async function submitArtifactMessage(
   prevState: ArtifactState,
   formData: FormData
 ): Promise<ArtifactState> {
+  // Require auth
+  const user = await getSessionUser();
+  if (!(user as any)?.id) {
+    return { ...prevState, error: "Unauthorized" };
+  }
+
   let parsed: z.infer<typeof inputSchema>;
   try {
     parsed = inputSchema.parse({
       prompt: String(formData.get("prompt") ?? ""),
       doc: String(formData.get("doc") ?? ""),
+      entryId: ((): string | null => {
+        const v = formData.get("entryId");
+        if (v === null) return null;
+        const s = String(v);
+        return s.length ? s : null;
+      })(),
+      docType: ((): "obituary" | "eulogy" => {
+        const v = String(formData.get("docType") ?? "obituary");
+        return v === "eulogy" ? "eulogy" : "obituary";
+      })(),
     });
   } catch (e) {
     return { ...prevState, error: "Invalid input." };
@@ -65,6 +90,39 @@ export async function submitArtifactMessage(
         document: z.string(),
       }),
     });
+
+    // Persist state: ensure user doc exists, insert messages, update content
+    let docRow = await db.query.ArtifactDocumentTable.findFirst({
+      where: and(
+        eq(ArtifactDocumentTable.userId, (user as any).id),
+        (parsed.entryId ?? null) === null
+          ? isNull(ArtifactDocumentTable.entryId)
+          : eq(ArtifactDocumentTable.entryId, parsed.entryId as string),
+        eq(ArtifactDocumentTable.docType, parsed.docType ?? "obituary")
+      ),
+    });
+    if (!docRow) {
+      const inserted = await db
+        .insert(ArtifactDocumentTable)
+        .values({
+          id: crypto.randomUUID(),
+          userId: (user as any).id,
+          entryId: parsed.entryId ?? null,
+          docType: parsed.docType ?? "obituary",
+          title: null,
+          content: currentDoc,
+        })
+        .returning();
+      docRow = inserted[0];
+    }
+    await db.insert(ArtifactMessageTable).values([
+      { artifactId: docRow.id, role: "user", content: parsed.prompt },
+      { artifactId: docRow.id, role: "assistant", content: object.message },
+    ]);
+    await db
+      .update(ArtifactDocumentTable)
+      .set({ content: object.document?.length ? object.document : currentDoc, updatedAt: new Date() })
+      .where(eq(ArtifactDocumentTable.id, docRow.id));
 
     const nextMessages: ChatMessage[] = [
       ...prevState.messages,

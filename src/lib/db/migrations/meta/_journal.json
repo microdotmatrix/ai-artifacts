@@ -8,6 +8,62 @@
       "when": 1754150640928,
       "tag": "0000_greedy_bloodaxe",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1754935795919,
+      "tag": "0001_rare_marvel_boy",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1754941502115,
+      "tag": "0002_wise_viper",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1755006021752,
+      "tag": "0003_daily_mandroid",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1755006053928,
+      "tag": "0004_flimsy_shen",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1755006137761,
+      "tag": "0005_equal_dazzler",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1755006210666,
+      "tag": "0006_flat_silhouette",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1755006282979,
+      "tag": "0007_concerned_jigsaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1755028024793,
+      "tag": "0008_curly_kid_colt",
+      "breakpoints": true
     }
   ]
 }

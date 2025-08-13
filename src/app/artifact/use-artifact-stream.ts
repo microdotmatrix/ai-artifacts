@@ -8,6 +8,8 @@ export type StartParams = {
   doc: string;
   messages: ChatMessage[];
   onDone?: (final: { message: string; document: string }) => void;
+  entryId?: string | null;
+  docType?: "obituary" | "eulogy";
 };
 
 export const useArtifactStream = () => {
@@ -18,7 +20,7 @@ export const useArtifactStream = () => {
   const [error, setError] = useState<string | null>(null);
 
   const start = useCallback(
-    async ({ prompt, doc, messages, onDone }: StartParams) => {
+    async ({ prompt, doc, messages, onDone, entryId, docType }: StartParams) => {
       if (isStreaming) return;
       setAssistantText("");
       setDocText(doc);
@@ -29,10 +31,18 @@ export const useArtifactStream = () => {
       abortRef.current = controller;
 
       try {
-        const res = await fetch("/api/artifact/stream", {
+        // Use the new UI data stream route powered by AI SDK tools
+        const res = await fetch("/api/artifact/ui", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, doc, messages }),
+          // We always request an update with the prompt as description.
+          // The server falls back to create when no document exists.
+          body: JSON.stringify({
+            mode: "update",
+            description: prompt,
+            entryId: entryId ?? null,
+            docType: docType ?? "obituary",
+          }),
           signal: controller.signal,
         });
         if (!res.ok || !res.body) throw new Error("Stream failed to start");
@@ -40,6 +50,8 @@ export const useArtifactStream = () => {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        let localAssistant = "";
+        let localDoc = doc;
 
         while (true) {
           const { value, done } = await reader.read();
@@ -52,31 +64,48 @@ export const useArtifactStream = () => {
             buffer = buffer.slice(idx + 2);
             if (!block) continue;
 
-            let eventName = "";
+            // Parse SSE block. We only rely on data: JSON lines per AI SDK Data Stream Protocol.
             let dataLine = "";
             for (const line of block.split("\n")) {
-              if (line.startsWith("event:")) eventName = line.slice(6).trim();
               if (line.startsWith("data:")) dataLine = line.slice(5).trim();
             }
-            if (!eventName) continue;
+            if (!dataLine) continue;
 
-            if (eventName === "object") {
-              try {
-                const partial = JSON.parse(dataLine);
-                if (typeof partial.message === "string") setAssistantText(partial.message);
-                if (typeof partial.document === "string") setDocText(partial.document);
-              } catch {
-                // ignore partial parse errors
+            try {
+              const payload = JSON.parse(dataLine);
+              const t: string | undefined = payload?.type;
+              // Handle custom data parts emitted by our tools
+              if (t === "data-clear") {
+                localAssistant = "";
+                localDoc = "";
+                setAssistantText("");
+                setDocText("");
+              } else if (t === "data-textDelta") {
+                const delta = typeof payload.data === "string" ? payload.data : "";
+                if (delta) {
+                  localDoc += delta;
+                  localAssistant += delta;
+                  setDocText(localDoc);
+                  setAssistantText(localAssistant);
+                }
+              } else if (t === "data-finish") {
+                // Stream finished; surface the final aggregates
+                onDone?.({ message: localAssistant, document: localDoc });
+              } else if (t === "error") {
+                const et = typeof payload.errorText === "string" ? payload.errorText : "Stream error";
+                setError(et);
+              } else if (t === "text-delta") {
+                // Be defensive: if text parts are ever merged into stream
+                const delta = typeof payload.delta === "string" ? payload.delta : "";
+                if (delta) {
+                  localDoc += delta;
+                  localAssistant += delta;
+                  setDocText(localDoc);
+                  setAssistantText(localAssistant);
+                }
               }
-            } else if (eventName === "done") {
-              try {
-                const final = JSON.parse(dataLine);
-                if (typeof final.message === "string") setAssistantText(final.message);
-                if (typeof final.document === "string") setDocText(final.document);
-                onDone?.(final);
-              } catch {
-                // ignore
-              }
+            } catch {
+              // ignore JSON parse errors for malformed chunks
             }
           }
         }

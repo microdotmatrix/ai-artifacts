@@ -10,18 +10,24 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { useArtifactStream } from "./use-artifact-stream";
 
-const initialState: ArtifactState = {
-  doc: "",
-  messages: [],
+type InitialProps = {
+  initialDoc?: string;
+  initialMessages?: ChatMessage[];
 };
 
 type Props = {
   action: (prevState: ArtifactState, formData: FormData) => Promise<ArtifactState>;
-};
+  entryId?: string | null;
+  docType?: "obituary" | "eulogy";
+} & InitialProps;
 
-export const ArtifactWorkspace = ({ action }: Props) => {
+export const ArtifactWorkspace = ({ action, initialDoc = "", initialMessages = [], entryId = null, docType = "obituary" }: Props) => {
+  const initialState: ArtifactState = useMemo(
+    () => ({ doc: initialDoc, messages: initialMessages }),
+    [initialDoc, initialMessages]
+  );
   const [state, formAction, isPending] = useActionState(action, initialState);
-  const [doc, setDoc] = useState<string>("");
+  const [doc, setDoc] = useState<string>(initialDoc ?? "");
   const [prompt, setPrompt] = useState<string>("");
   const [lastPrompt, setLastPrompt] = useState<string>("");
   const [localMessages, setLocalMessages] = useState<ChatMessage[]>([]);
@@ -85,6 +91,9 @@ export const ArtifactWorkspace = ({ action }: Props) => {
             <form action={formAction} className="flex flex-col gap-3">
               {/* keep server action aware of current doc */}
               <input type="hidden" name="doc" value={doc} />
+              {/* per-entry routing for persistence */}
+              <input type="hidden" name="entryId" value={entryId ?? ""} />
+              <input type="hidden" name="docType" value={docType} />
 
               <Input
                 name="prompt"
@@ -106,6 +115,8 @@ export const ArtifactWorkspace = ({ action }: Props) => {
                       prompt: p,
                       doc,
                       messages: ([...(state?.messages ?? []), ...localMessages]) as ChatMessage[],
+                      entryId,
+                      docType,
                       onDone: (final) => {
                         setDoc(final.document);
                         setLocalMessages((prev) => [

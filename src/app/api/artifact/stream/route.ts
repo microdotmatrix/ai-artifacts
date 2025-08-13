@@ -3,6 +3,13 @@ import { z } from "zod";
 import { env } from "@/lib/env/server";
 import { createOpenAI } from "@ai-sdk/openai";
 import { streamObject } from "ai";
+import { getSessionUser } from "@/lib/auth/server";
+import { db } from "@/lib/db";
+import {
+  ArtifactDocumentTable,
+  ArtifactMessageTable,
+} from "@/lib/db/schema";
+import { and, eq, isNull } from "drizzle-orm";
 
 const requestSchema = z.object({
   prompt: z.string().min(1),
@@ -15,11 +22,18 @@ const requestSchema = z.object({
       })
     )
     .default([]),
+  entryId: z.string().uuid().nullable().optional(),
+  docType: z.enum(["obituary", "eulogy"]).optional().default("obituary"),
 });
 
 export async function POST(req: NextRequest) {
+  // Require auth
+  const user = await getSessionUser();
+  if (!(user as any)?.id) {
+    return new Response("Unauthorized", { status: 401 });
+  }
   const body = await req.json();
-  const { prompt, doc, messages } = requestSchema.parse(body);
+  const { prompt, doc, messages, entryId, docType } = requestSchema.parse(body);
 
   const system =
     "You are a helpful assistant that maintains a single user document. " +
@@ -60,6 +74,41 @@ export async function POST(req: NextRequest) {
         }
  
         const finalObject = await result.object;
+        // Persist final result for the authenticated user
+        try {
+          let docRow = await db.query.ArtifactDocumentTable.findFirst({
+            where: and(
+              eq(ArtifactDocumentTable.userId, (user as any).id),
+              (entryId ?? null) === null
+                ? isNull(ArtifactDocumentTable.entryId)
+                : eq(ArtifactDocumentTable.entryId, entryId as string),
+              eq(ArtifactDocumentTable.docType, docType ?? "obituary")
+            ),
+          });
+          if (!docRow) {
+            const inserted = await db
+              .insert(ArtifactDocumentTable)
+              .values({
+                userId: (user as any).id,
+                entryId: entryId ?? null,
+                docType: docType ?? "obituary",
+                title: null,
+                content: doc ?? "",
+              })
+              .returning();
+            docRow = inserted[0];
+          }
+          await db.insert(ArtifactMessageTable).values([
+            { artifactId: docRow.id, role: "user", content: prompt },
+            { artifactId: docRow.id, role: "assistant", content: finalObject.message },
+          ]);
+          await db
+            .update(ArtifactDocumentTable)
+            .set({ content: finalObject.document, updatedAt: new Date() })
+            .where(eq(ArtifactDocumentTable.id, docRow.id));
+        } catch (e) {
+          // Swallow persistence errors to not break stream delivery
+        }
         controller.enqueue(
           encoder.encode(
             `event: done\ndata: ${JSON.stringify(finalObject)}\n\n`
